@@ -26,6 +26,7 @@ param(
   [switch]$RemoveSource,
   [switch]$Yes,
   [switch]$NoDesktopShortcut,
+  [switch]$Gui,   # used by install.cmd for release downloads: no console window, results shown in a message box
   [string]$InstallDir = (Join-Path $env:LOCALAPPDATA 'Programs\Folio')
 )
 
@@ -34,6 +35,14 @@ $ProgressPreference = 'SilentlyContinue'   # makes Invoke-WebRequest much faster
 $PdfiumTag = 'chromium/7543'               # pinned: must match the pdfium-render API level in Cargo.toml
 $Version = '0.1.0'
 $SelfDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+
+function Show-Box($text, $icon) {
+  Add-Type -AssemblyName System.Windows.Forms
+  [void][System.Windows.Forms.MessageBox]::Show($text, 'Folio', 'OK', $icon)
+}
+if ($Gui) {
+  trap { Show-Box "Folio could not be installed.`n`n$($_.Exception.Message)" 'Error'; exit 1 }
+}
 
 function Say($m)  { Write-Host "==> $m" -ForegroundColor Magenta }
 function Warn($m) { Write-Host "!!  $m" -ForegroundColor Yellow }
@@ -143,6 +152,9 @@ foreach ($f in 'LICENSE', 'THIRD-PARTY-NOTICES.md', 'uninstall.ps1') {
   $p = Join-Path $SelfDir $f
   if (Test-Path $p) { Copy-Item $p (Join-Path $InstallDir $f) -Force }
 }
+# Files that came from a downloaded zip carry a "downloaded from the internet" mark, which is what makes
+# Windows show "Windows protected your PC" every time Folio starts. Clear it on the installed copies.
+Get-ChildItem $InstallDir -Recurse -File | Unblock-File -ErrorAction SilentlyContinue
 $Exe = Join-Path $InstallDir 'folio.exe'
 $Ico = Join-Path $InstallDir 'folio.ico'
 
@@ -195,6 +207,7 @@ try {
 } catch { }
 
 Say 'Folio is installed. Find it in the Start Menu or on your Desktop.'
+if ($Gui) { Show-Box "Folio is installed.`n`nFind it in the Start Menu or on your Desktop." 'Information' }
 Write-Host '    To make Folio the default PDF app: right-click a PDF > Open with > Choose another app > Folio > Always.'
 
 # ---- 8. Optional clean-up of the source folder -----------------------------------

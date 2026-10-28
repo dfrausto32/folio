@@ -27,6 +27,12 @@ small and starts quickly.
    - Linux: `./install.sh`
 3. Delete the download. Folio stays installed.
 
+**"Windows protected your PC" or "publisher could not be verified"?** Folio is not code-signed yet (a signing
+certificate costs money), so Windows warns about any new unsigned download. To avoid the warning, right-click
+`Folio-windows-x64.zip`, choose Properties, tick **Unblock**, press OK, and only then unpack it. If the blue
+SmartScreen box still appears, choose **More info** then **Run anyway**. The installer clears the same mark on the
+installed copy, so Folio itself starts without a warning afterwards.
+
 ### Option B: build from source and leave nothing behind
 
 ```bash
