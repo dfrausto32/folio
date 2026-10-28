@@ -1,0 +1,11 @@
+# build output
+/target/
+/src-tauri/gen/
+# downloaded PDFium libraries (the installers fetch these)
+/vendor/
+# editor / OS
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.folio-tmp

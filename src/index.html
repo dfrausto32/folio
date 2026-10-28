@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Folio</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div id="app">
+    <header id="toolbar">
+      <div class="group">
+        <button id="btn-open" title="Open PDF (Ctrl+O)">Open</button>
+        <button id="btn-save" title="Save (Ctrl+S)" disabled>Save</button>
+        <button id="btn-saveas" title="Save a copy (Ctrl+Shift+S)" disabled>Save As</button>
+        <button id="btn-undo" title="Undo (Ctrl+Z)" disabled>Undo</button>
+      </div>
+
+      <div class="group">
+        <button id="btn-zoom-out" title="Zoom out (Ctrl+-)" disabled>&minus;</button>
+        <button id="zoom-label" title="Fit to width (Ctrl+0)" class="wide" disabled>100%</button>
+        <button id="btn-zoom-in" title="Zoom in (Ctrl++)" disabled>+</button>
+        <span class="pager">
+          <input id="page-input" type="number" min="1" value="1" disabled aria-label="Page number" />
+          <span id="page-total">/ 0</span>
+        </span>
+      </div>
+
+      <div class="group tools" role="radiogroup" aria-label="Tools">
+        <button data-tool="select" class="tool active" title="Select / scroll (V)">Select</button>
+        <button data-tool="highlight" class="tool" title="Highlight an area (H)">Highlight</button>
+        <button data-tool="box" class="tool" title="Draw a box (B)">Box</button>
+        <button data-tool="pen" class="tool" title="Freehand pen (P)">Pen</button>
+        <button data-tool="text" class="tool" title="Add text (T)">Text</button>
+        <input id="color" type="color" value="#ffd21f" title="Colour" />
+        <select id="size" title="Line width / text size"></select>
+      </div>
+
+      <div class="group">
+        <div class="menu-wrap">
+          <button id="btn-pages" disabled>Pages &#9662;</button>
+          <div id="menu-pages" class="menu" hidden>
+            <button data-act="rotate-ccw">Rotate left</button>
+            <button data-act="rotate-cw">Rotate right</button>
+            <button data-act="delete">Delete page(s)</button>
+            <button data-act="blank">Insert blank page after</button>
+            <button data-act="insert-pdf">Insert pages from PDF&hellip;</button>
+            <hr />
+            <button data-act="extract">Extract page(s) to new PDF&hellip;</button>
+            <button data-act="split">Split into several PDFs&hellip;</button>
+            <button data-act="copy-text">Copy text of this page</button>
+            <hr />
+            <button data-act="print">Print&hellip;</button>
+          </div>
+        </div>
+        <button id="btn-merge" title="Combine several PDFs into one">Merge PDFs</button>
+      </div>
+
+      <div class="group search">
+        <input id="search-input" type="search" placeholder="Find in document (Ctrl+F)" disabled />
+        <button id="btn-prev" title="Previous match (Shift+Enter)" disabled>&#8593;</button>
+        <button id="btn-next" title="Next match (Enter)" disabled>&#8595;</button>
+        <label class="chk" title="Match case"><input id="match-case" type="checkbox" /> Aa</label>
+        <span id="search-count"></span>
+      </div>
+
+      <div class="group right">
+        <button id="btn-theme" title="Switch light / dark">Theme</button>
+      </div>
+    </header>
+
+    <div id="main">
+      <aside id="sidebar" aria-label="Pages">
+        <div id="thumbs"></div>
+      </aside>
+      <section id="viewer" tabindex="-1">
+        <div id="pages"></div>
+        <div id="welcome">
+          <div class="welcome-card">
+            <img src="icon.png" alt="" width="88" height="88" />
+            <h1>Folio</h1>
+            <p>Drop a PDF here, or</p>
+            <button id="btn-open-big" class="primary">Open a PDF</button>
+            <p class="hint">Edit, annotate, rearrange, merge and split. Everything stays on your computer.</p>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <footer id="status"><span id="status-text">Ready</span></footer>
+  </div>
+
+  <div id="print-root" aria-hidden="true"></div>
+  <div id="toast" role="status" hidden></div>
+  <div id="modal" hidden>
+    <div class="modal-card" role="dialog" aria-modal="true">
+      <h2 id="modal-title"></h2>
+      <div id="modal-body"></div>
+      <div class="modal-actions" id="modal-actions"></div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

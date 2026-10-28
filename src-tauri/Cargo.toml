@@ -1,0 +1,21 @@
+[package]
+name = "folio"
+version = "0.1.0"
+description = "Folio: a fast, private PDF viewer and editor"
+edition = "2021"
+build = "build.rs"
+
+[dependencies]
+folio-core = { path = "../crates/folio-core" }
+tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[features]
+default = ["custom-protocol"]
+# Embeds the UI into the binary. Required for release builds made without the Tauri CLI.
+custom-protocol = ["tauri/custom-protocol"]

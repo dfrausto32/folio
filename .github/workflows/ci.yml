@@ -1,0 +1,28 @@
+name: CI
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Linux build libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential pkg-config libwebkit2gtk-4.1-dev libssl-dev libxdo-dev libayatana-appindicator3-dev librsvg2-dev
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Fetch PDFium
+        run: |
+          mkdir -p vendor/pdfium
+          curl -fL -o vendor/pdfium.tgz https://github.com/bblanchon/pdfium-binaries/releases/download/chromium/7543/pdfium-linux-x64.tgz
+          tar -xzf vendor/pdfium.tgz -C vendor/pdfium
+      - name: Engine tests (real PDFium)
+        run: cargo test -p folio-core
+        env:
+          FOLIO_PDFIUM_DIR: ${{ github.workspace }}/vendor/pdfium/lib
+      - name: Build the app
+        run: cargo build --release -p folio
