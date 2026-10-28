@@ -11,6 +11,7 @@ small and starts quickly.
 - **Read**: smooth scrolling, zoom (Ctrl + mouse wheel), fit to width, page thumbnails, password-protected files
 - **Search**: find text across the whole document with highlighted matches (Ctrl+F, Enter / Shift+Enter to step)
 - **Mark up**: highlight, box, freehand pen and text. Marks are written into the page when you save
+- **Sign**: draw, type or import a picture of your signature (press S), keep it for next time, click a page to place it, then drag and resize it before pressing Place. Works on rotated pages and can be undone
 - **Pages**: rotate, delete, insert blank pages, insert pages from another PDF, drag thumbnails to reorder
 - **Split and merge**: extract pages to a new file, split into several files, merge many PDFs into one
 - **Safe**: full undo for every change, saves never destroy the original if something goes wrong, a prompt before closing with unsaved work
@@ -119,7 +120,8 @@ When you bump `pdfium-render`, change the tag in `install.sh`, `install.ps1` and
 
 - Marks are baked into the page on save. You can undo them before saving, but not edit them afterwards.
 - Highlight is a drawn rectangle, not text-selection based. There is no text selection or copy-by-drag yet (use "Copy text of this page").
-- No form filling, digital signatures, OCR, or editing of existing text.
+- Signatures are pictures placed on the page (like signing a printout and scanning it). They are not cryptographic digital signatures, so they do not prove who signed or detect later changes. Saved signatures are kept in the app's local storage on this computer and are removed by the uninstaller.
+- No form filling, cryptographic digital signatures, OCR, or editing of existing text.
 - Merging password-protected files is not supported yet.
 - Added text uses a built-in Latin font. Characters outside Latin-1 become `?`.
 - Printing uses the system print dialog via the web view. It works on Windows; the Linux web view may not offer it.

@@ -99,6 +99,7 @@ body.dragging-thumb { cursor: grabbing; }
 body[data-tool="select"] .page svg.ov { pointer-events: none; }
 body[data-tool="highlight"] .page, body[data-tool="box"] .page, body[data-tool="pen"] .page { cursor: crosshair; }
 body[data-tool="text"] .page { cursor: text; }
+body[data-tool="sign"] .page { cursor: copy; }
 .page svg.ov { touch-action: none; }
 .hit { fill: var(--hit); }
 .hit.current { fill: var(--hit-current); stroke: #ff7a00; stroke-width: 1; }
@@ -146,3 +147,36 @@ body.drop-hover .welcome-card { border-color: var(--accent); background: var(--a
   #print-root img:last-child { page-break-after: auto; break-after: auto; }
   @page { margin: 0; }
 }
+
+/* ── signatures ────────────────────────────────────── */
+@font-face { font-family: 'Dancing Script'; src: url('fonts/DancingScript.ttf') format('truetype'); font-weight: 400 700; font-display: swap; }
+@font-face { font-family: 'Caveat'; src: url('fonts/Caveat.ttf') format('truetype'); font-weight: 400 700; font-display: swap; }
+.sig-tabs { display: flex; gap: 4px; margin-bottom: 8px; }
+.sig-tabs button { flex: 1; }
+.sig-tabs button.active { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+.sig-panel[hidden] { display: none; }
+.sig-pad, .sig-preview { display: block; width: 100%; max-width: 480px; aspect-ratio: 16 / 5; height: auto; background: #fff; border: 1px solid var(--border); border-radius: 8px; touch-action: none; cursor: crosshair; }
+.sig-preview { cursor: default; margin-top: 8px; object-fit: contain; }
+.sig-pad { background-image: linear-gradient(transparent 74%, #c9ccd8 74%, #c9ccd8 74.6%, transparent 74.6%); }
+.sig-name { margin-bottom: 6px; }
+.sig-fonts { flex-wrap: wrap; }
+.sig-font.active { border-color: var(--accent); background: var(--accent-soft); }
+.sig-foot { justify-content: space-between; margin-top: 12px; flex-wrap: wrap; }
+.sig-list { display: flex; flex-direction: column; gap: 8px; max-height: 320px; overflow: auto; }
+.sig-row { display: flex; gap: 6px; align-items: stretch; }
+.sig-item { flex: 1; height: 72px; background: #fff; display: flex; align-items: center; justify-content: center; padding: 4px; }
+.sig-item.active { background: #fff; color: inherit; border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
+.sig-item img { max-width: 100%; max-height: 100%; }
+.sig-del { height: auto; }
+.sig-float { position: absolute; z-index: 9; outline: 1.5px dashed var(--accent); background: rgba(255, 255, 255, 0.35); cursor: move; touch-action: none; }
+.sig-float img { width: 100%; height: 100%; display: block; pointer-events: none; -webkit-user-drag: none; }
+.sig-h { position: absolute; width: 11px; height: 11px; background: var(--accent); border: 2px solid #fff; border-radius: 50%; }
+.sig-h-nw { left: -6px; top: -6px; cursor: nwse-resize; }
+.sig-h-ne { right: -6px; top: -6px; cursor: nesw-resize; }
+.sig-h-sw { left: -6px; bottom: -6px; cursor: nesw-resize; }
+.sig-h-se { right: -6px; bottom: -6px; cursor: nwse-resize; }
+.sig-bar { position: absolute; left: 0; bottom: calc(100% + 10px); display: flex; gap: 6px; cursor: default; white-space: nowrap; }
+.sig-bar button { height: 26px; padding: 0 12px; }
+.sig-bar button.primary { padding: 0 14px; }
+.sig-float.bar-below .sig-bar { bottom: auto; top: calc(100% + 10px); }
+.modal-card select { font: inherit; color: inherit; background: var(--panel-2); border: 1px solid var(--border); border-radius: 6px; height: 28px; padding: 0 8px; }

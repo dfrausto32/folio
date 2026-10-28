@@ -71,7 +71,7 @@ const setStatus = (s) => ($('#status-text').textContent = s);
 
 let modalOpen = false;
 /** Show a modal. actions: [{label, value, primary}]. Resolves with the chosen value (null on Esc). */
-function modal({ title, body, actions }) {
+function modal({ title, body, actions, onReady }) {
   return new Promise((resolve) => {
     modalOpen = true;
     $('#modal-title').textContent = title;
@@ -89,16 +89,18 @@ function modal({ title, body, actions }) {
       if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); done(null); }
       else if (e.key === 'Enter' && e.target.tagName !== 'TEXTAREA' && e.target.tagName !== 'BUTTON') {
         const p = actions.find((a) => a.primary);
-        if (p) { e.preventDefault(); e.stopPropagation(); done(p.getValue ? p.getValue() : p.value); }
+        if (p) { e.preventDefault(); e.stopPropagation(); choose(p); }
       }
+    };
+    const choose = (a) => {
+      if (a.validate && !a.validate()) return; // stay open so the person can fix it
+      done(a.getValue ? a.getValue() : a.value);
     };
     document.addEventListener('keydown', onKey, true);
     for (const a of actions) {
-      bar.append(el('button', {
-        class: a.primary ? 'primary' : '', text: a.label,
-        onclick: () => done(a.getValue ? a.getValue() : a.value),
-      }));
+      bar.append(el('button', { class: a.primary ? 'primary' : '', text: a.label, onclick: () => choose(a) }));
     }
+    if (onReady) onReady(done);
     $('#modal').hidden = false;
     const focusable = bodyEl.querySelector('input, select, textarea') || bar.querySelector('.primary') || bar.lastChild;
     if (focusable) { focusable.focus(); if (focusable.select) focusable.select(); }
@@ -217,6 +219,7 @@ const thumbObserver = new IntersectionObserver((entries) => {
 // ───────────────────────────── building the views ───────────────────────────
 
 function rebuild() {
+  closeSigFloat(false);
   S.gen++;
   mainObserver.disconnect();
   thumbObserver.disconnect();
@@ -353,6 +356,7 @@ function setZoom(z, fit = false) {
   S.fit = fit;
   S.zoom = clamp(z, 0.1, 6);
   S.doc.pages.forEach((_, i) => sizePageEl(i));
+  layoutSigFloat();
   v.scrollTop = ratio * v.scrollHeight;
   $('#zoom-label').textContent = Math.round(S.zoom * 100) + '%';
   clearTimeout(zoomTimer);
@@ -507,6 +511,7 @@ function targetPages() {
 
 async function pageAction(act) {
   if (!S.doc) return;
+  closeTextEdit();
   const pages = targetPages();
   const last = pages[pages.length - 1];
   const id = S.doc.id;
@@ -712,9 +717,14 @@ function setTool(t) {
   const opts = t === 'text' ? [10, 12, 14, 18, 24, 36] : [1, 2, 3, 5, 8];
   const cur = t === 'text' ? S.textSize : S.lineW;
   for (const o of opts) sel.append(el('option', { value: o, text: t === 'text' ? o + ' pt text' : o + ' pt line', ...(o === cur ? { selected: '' } : {}) }));
-  sel.disabled = t === 'select' || t === 'highlight';
+  sel.disabled = t === 'select' || t === 'highlight' || t === 'sign';
+  $('#color').disabled = t === 'sign';
+  $('#btn-sigs').hidden = t !== 'sign';
   if (S.colors[t]) $('#color').value = S.colors[t];
   S.color = $('#color').value;
+  if (t === 'sign' && !activeSignature()) {
+    chooseSignature().then((ok) => { if (!ok && S.tool === 'sign') setTool('select'); });
+  }
 }
 
 function pagePoint(rec, e) {
@@ -728,11 +738,12 @@ let pendingText = null;
 $('#pages').addEventListener('pointerdown', (e) => {
   if (!S.doc || S.tool === 'select' || e.button !== 0) return;
   const boxEl = e.target.closest('.page');
-  if (!boxEl || e.target.closest('.text-edit')) { return; }
+  if (!boxEl || e.target.closest('.text-edit') || e.target.closest('.sig-float')) { return; }
   e.preventDefault();
-  closeTextEdit();
+  closeTextEdit(true, true);
   const rec = boxEl._rec;
   const pt = pagePoint(rec, e);
+  if (S.tool === 'sign') { startSigFloat(rec, pt); return; }
   if (S.tool === 'text') { pendingText = { rec, pt }; return; }
   const color = S.color;
   let shape;
@@ -818,13 +829,310 @@ function startText(rec, pt) {
   setTimeout(() => ta.focus(), 0); // after the click's default focus handling has finished
 }
 
-function closeTextEdit(commit = true) {
+function closeTextEdit(commit = true, keepFloat = false) {
+  if (!keepFloat) closeSigFloat(commit);
   if (!textEdit) return;
   const { ta, rec, pt, size, color } = textEdit;
   textEdit = null;
   const text = ta.value.replace(/\s+$/, '');
   ta.remove();
   if (commit && text) commitAnnot({ kind: 'text', page: rec.i, x: pt[0], y: pt[1], text, size, color: hexToRgb(color) }, rec.i);
+}
+
+// ───────────────────────────── signatures ───────────────────────────────────
+/* A signature is a transparent PNG. Saved ones live in the web view's local storage (this computer only).
+   Placing one adds a movable, resizable picture; "Place" bakes it into the page like the other marks. */
+
+const SIG_KEY = 'folio-signatures';
+const SIG_MAX = 6;
+const SIG_FONTS = [
+  { name: 'Dancing Script', label: 'Flowing' },
+  { name: 'Caveat', label: 'Handwritten' },
+];
+const SIG_INKS = { Black: '#111111', Blue: '#1c3f9e' };
+
+function loadSignatures() {
+  try {
+    const list = JSON.parse(localStorage.getItem(SIG_KEY) || '[]');
+    return Array.isArray(list) ? list.filter((s) => s && typeof s.png === 'string' && s.w > 0 && s.h > 0) : [];
+  } catch (_) { return []; }
+}
+function storeSignatures(list) {
+  try { localStorage.setItem(SIG_KEY, JSON.stringify(list.slice(0, SIG_MAX))); return true; } catch (_) { return false; }
+}
+function activeSignature() {
+  if (S.sigTemp) return S.sigTemp;
+  return loadSignatures().find((s) => s.id === S.sigId) || null;
+}
+
+/** Crop transparent margins and cap the size so saved signatures stay small. */
+function trimCanvas(src, pad = 10, maxW = 1000) {
+  const ctx = src.getContext('2d', { willReadFrequently: true });
+  const { width: w, height: h } = src;
+  const d = ctx.getImageData(0, 0, w, h).data;
+  let x0 = w, y0 = h, x1 = -1, y1 = -1;
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    if (d[(y * w + x) * 4 + 3] > 12) { if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; }
+  }
+  if (x1 < 0) return null;
+  x0 = Math.max(0, x0 - pad); y0 = Math.max(0, y0 - pad); x1 = Math.min(w - 1, x1 + pad); y1 = Math.min(h - 1, y1 + pad);
+  const cw = x1 - x0 + 1, ch = y1 - y0 + 1, k = Math.min(1, maxW / cw);
+  const out = document.createElement('canvas');
+  out.width = Math.max(1, Math.round(cw * k)); out.height = Math.max(1, Math.round(ch * k));
+  const octx = out.getContext('2d');
+  octx.imageSmoothingQuality = 'high';
+  octx.drawImage(src, x0, y0, cw, ch, 0, 0, out.width, out.height);
+  return out;
+}
+
+function canvasToSignature(c) {
+  const t = trimCanvas(c);
+  return t ? { png: t.toDataURL('image/png'), w: t.width, h: t.height } : null;
+}
+
+/** The signature maker. Resolves with {png,w,h,save} or null. */
+async function signatureMaker() {
+  let tab = 'draw', ink = SIG_INKS.Black;
+
+  // Draw tab
+  const pad = el('canvas', { class: 'sig-pad', width: '960', height: '300' });
+  const pctx = pad.getContext('2d');
+  let strokes = 0, pen = null;
+  const penStyle = () => { pctx.lineWidth = 6; pctx.lineCap = 'round'; pctx.lineJoin = 'round'; pctx.strokeStyle = ink; pctx.fillStyle = ink; };
+  const padPt = (ev) => { const r = pad.getBoundingClientRect(); return [(ev.clientX - r.left) * (pad.width / r.width), (ev.clientY - r.top) * (pad.height / r.height)]; };
+  pad.addEventListener('pointerdown', (e) => {
+    e.preventDefault(); pad.setPointerCapture(e.pointerId); penStyle();
+    pen = padPt(e); strokes++;
+    pctx.beginPath(); pctx.arc(pen[0], pen[1], 3, 0, Math.PI * 2); pctx.fill();
+  });
+  pad.addEventListener('pointermove', (e) => {
+    if (!pen) return;
+    for (const ev of (e.getCoalescedEvents && e.getCoalescedEvents().length ? e.getCoalescedEvents() : [e])) {
+      const p = padPt(ev); penStyle();
+      pctx.beginPath(); pctx.moveTo(pen[0], pen[1]); pctx.lineTo(p[0], p[1]); pctx.stroke(); pen = p;
+    }
+  });
+  const penUp = () => { pen = null; };
+  pad.addEventListener('pointerup', penUp); pad.addEventListener('pointercancel', penUp);
+  const clearBtn = el('button', { text: 'Clear', onclick: () => { pctx.clearRect(0, 0, pad.width, pad.height); strokes = 0; } });
+  const drawPanel = el('div', { class: 'sig-panel' }, [
+    el('p', { text: 'Sign with your mouse, finger or pen.' }), pad, el('div', { class: 'row' }, [clearBtn]),
+  ]);
+
+  // Type tab
+  const nameIn = el('input', { type: 'text', placeholder: 'Type your name', class: 'sig-name' });
+  let fontName = SIG_FONTS[0].name;
+  const typedPrev = el('canvas', { class: 'sig-preview', width: '960', height: '300' });
+  const fontRow = el('div', { class: 'row sig-fonts' });
+  const paintTyped = async () => {
+    const c = typedPrev.getContext('2d');
+    c.clearRect(0, 0, typedPrev.width, typedPrev.height);
+    const text = nameIn.value.trim();
+    if (!text) return;
+    try { await document.fonts.load(`120px "${fontName}"`, text); } catch (_) { /* fall back to the default cursive */ }
+    let size = 170;
+    c.font = `${size}px "${fontName}", cursive`;
+    const maxW = typedPrev.width - 60;
+    const mw = c.measureText(text).width;
+    if (mw > maxW) { size = Math.floor(size * maxW / mw); c.font = `${size}px "${fontName}", cursive`; }
+    c.fillStyle = ink; c.textBaseline = 'alphabetic';
+    c.fillText(text, 30, typedPrev.height / 2 + size * 0.3);
+  };
+  for (const f of SIG_FONTS) {
+    const b = el('button', { text: f.label, class: 'sig-font' + (f.name === fontName ? ' active' : ''), onclick: () => {
+      fontName = f.name; $$('.sig-font', fontRow).forEach((x) => x.classList.toggle('active', x === b)); paintTyped();
+    } });
+    b.style.fontFamily = `"${f.name}", cursive`; b.style.fontSize = '17px';
+    fontRow.append(b);
+  }
+  nameIn.addEventListener('input', paintTyped);
+  const typePanel = el('div', { class: 'sig-panel' }, [el('p', { text: 'Type your name and pick a style.' }), nameIn, fontRow, typedPrev]);
+
+  // Image tab
+  const imgPrev = el('canvas', { class: 'sig-preview', width: '960', height: '300' });
+  const clean = el('input', { type: 'checkbox', checked: '' });
+  let loaded = null;
+  const paintImage = () => {
+    const c = imgPrev.getContext('2d');
+    c.clearRect(0, 0, imgPrev.width, imgPrev.height);
+    if (!loaded) return;
+    const k = Math.min(imgPrev.width / loaded.width, imgPrev.height / loaded.height, 1);
+    const w = Math.max(1, Math.round(loaded.width * k)), h = Math.max(1, Math.round(loaded.height * k));
+    imgPrev.width = w; imgPrev.height = h;
+    const cc = imgPrev.getContext('2d', { willReadFrequently: true });
+    cc.drawImage(loaded, 0, 0, w, h);
+    if (clean.checked) {
+      // Turn a photo or scan of a signature on paper into ink on a transparent background.
+      const id = cc.getImageData(0, 0, w, h), d = id.data;
+      const rgb = hexToRgb(ink);
+      for (let i = 0; i < d.length; i += 4) {
+        const lum = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
+        const a = clamp((235 - lum) / 120, 0, 1) * (d[i + 3] / 255);
+        d[i] = rgb[0]; d[i + 1] = rgb[1]; d[i + 2] = rgb[2]; d[i + 3] = Math.round(a * 255);
+      }
+      cc.putImageData(id, 0, 0);
+    }
+  };
+  const file = el('input', { type: 'file', accept: 'image/png,image/jpeg,image/webp,image/gif,image/bmp' });
+  file.addEventListener('change', () => {
+    const f = file.files && file.files[0];
+    if (!f) return;
+    const url = URL.createObjectURL(f);
+    const im = new Image();
+    im.onload = () => { loaded = im; paintImage(); URL.revokeObjectURL(url); };
+    im.onerror = () => { URL.revokeObjectURL(url); toast('That file could not be read as a picture.', true); };
+    im.src = url;
+  });
+  clean.addEventListener('change', paintImage);
+  const imagePanel = el('div', { class: 'sig-panel' }, [
+    el('p', { text: 'Use a picture of your signature, for example a photo of it signed on white paper.' }),
+    file,
+    el('label', { class: 'chk' }, [clean, ' Remove the paper background']),
+    imgPrev,
+  ]);
+
+  // Shared bits
+  const panels = { draw: drawPanel, type: typePanel, image: imagePanel };
+  const tabBar = el('div', { class: 'sig-tabs' });
+  const showTab = (t) => {
+    tab = t;
+    for (const [k, p] of Object.entries(panels)) p.hidden = k !== t;
+    $$('button', tabBar).forEach((b) => b.classList.toggle('active', b.dataset.t === t));
+    if (t === 'type') nameIn.focus();
+  };
+  for (const [k, label] of [['draw', 'Draw'], ['type', 'Type'], ['image', 'Image']]) {
+    tabBar.append(el('button', { text: label, 'data-t': k, onclick: () => showTab(k) }));
+  }
+  const inkSel = el('select', {}, Object.keys(SIG_INKS).map((n) => el('option', { value: SIG_INKS[n], text: n + ' ink' })));
+  inkSel.addEventListener('change', () => { ink = inkSel.value; paintTyped(); loaded && paintImage(); });
+  const saveChk = el('input', { type: 'checkbox', checked: '' });
+  const foot = el('div', { class: 'row sig-foot' }, [inkSel, el('label', { class: 'chk' }, [saveChk, ' Keep for next time (stored on this computer only)'])]);
+
+  const build = () => {
+    const src = tab === 'draw' ? (strokes ? pad : null) : tab === 'type' ? (nameIn.value.trim() ? typedPrev : null) : (loaded ? imgPrev : null);
+    return src ? canvasToSignature(src) : null;
+  };
+  showTab('draw');
+  return modal({
+    title: 'Create your signature',
+    body: [tabBar, drawPanel, typePanel, imagePanel, foot],
+    actions: [
+      { label: 'Cancel', value: null },
+      {
+        label: 'Use signature', primary: true,
+        validate: () => { if (build()) return true; toast(tab === 'draw' ? 'Draw your signature first.' : tab === 'type' ? 'Type your name first.' : 'Choose a picture first.', true); return false; },
+        getValue: () => ({ ...build(), save: saveChk.checked }),
+      },
+    ],
+  });
+}
+
+/** Pick a saved signature or make a new one. Resolves true when a signature is ready to place. */
+async function chooseSignature() {
+  const make = async () => {
+    const r = await signatureMaker();
+    if (!r) return false;
+    if (r.save) {
+      const rec = { id: 's' + Date.now().toString(36), png: r.png, w: r.w, h: r.h };
+      const list = [rec, ...loadSignatures()].slice(0, SIG_MAX);
+      if (!storeSignatures(list)) toast('Could not keep the signature for later, but you can still use it now.', true);
+      S.sigId = rec.id;
+      S.sigTemp = loadSignatures().some((s) => s.id === rec.id) ? null : rec; // not stored: use it for this session only
+    } else { S.sigTemp = { id: 'tmp', png: r.png, w: r.w, h: r.h }; }
+    return true;
+  };
+  for (;;) {
+    const list = loadSignatures();
+    if (!list.length) return make();
+    let doneFn = null;
+    const rows = el('div', { class: 'sig-list' }, list.map((s) => {
+      const im = el('img', { src: s.png, alt: 'Saved signature', draggable: 'false' });
+      const use = el('button', { class: 'sig-item' + (s.id === S.sigId && !S.sigTemp ? ' active' : ''), title: 'Use this signature', onclick: () => doneFn(['use', s.id]) }, [im]);
+      const del = el('button', { class: 'sig-del', text: '✕', title: 'Delete this saved signature', onclick: () => doneFn(['del', s.id]) });
+      return el('div', { class: 'sig-row' }, [use, del]);
+    }));
+    const r = await modal({
+      title: 'Your signatures',
+      body: [el('p', { text: 'Pick one to place on a page.' }), rows],
+      actions: [{ label: 'Cancel', value: null }, { label: 'Create new…', value: ['new'], primary: false }],
+      onReady: (done) => { doneFn = done; },
+    });
+    if (!r) return !!activeSignature();
+    if (r[0] === 'use') { S.sigId = r[1]; S.sigTemp = null; return true; }
+    if (r[0] === 'del') { storeSignatures(loadSignatures().filter((s) => s.id !== r[1])); if (S.sigId === r[1]) S.sigId = null; continue; }
+    if (r[0] === 'new') { if (await make()) return true; }
+  }
+}
+
+let sigFloat = null;
+
+/** Put a movable picture of the signature on page `rec`, centred on `pt`. Nothing is written until "Place". */
+function startSigFloat(rec, pt) {
+  const sig = activeSignature();
+  if (!sig) { chooseSignature(); return; }
+  const page = S.doc.pages[rec.i];
+  const aspect = sig.h / sig.w;
+  let w = sigFloat ? sigFloat.w : (S.sigWidth || Math.min(190, page.width * 0.4));
+  w = clamp(w, 24, Math.min(page.width, page.height / aspect));
+  closeSigFloat(false);
+  const h = w * aspect;
+  const x = clamp(pt[0] - w / 2, 0, page.width - w), y = clamp(pt[1] - h / 2, 0, page.height - h);
+
+  const img = el('img', { src: sig.png, alt: '', draggable: 'false' });
+  const bar = el('div', { class: 'sig-bar' }, [
+    el('button', { class: 'primary', text: 'Place', title: 'Add to the page (Enter)', onclick: () => closeSigFloat(true) }),
+    el('button', { text: 'Cancel', title: 'Discard (Esc)', onclick: () => closeSigFloat(false) }),
+  ]);
+  const box = el('div', { class: 'sig-float' }, [img, bar, ...['nw', 'ne', 'sw', 'se'].map((c) => el('span', { class: 'sig-h sig-h-' + c, 'data-c': c }))]);
+  rec.box.append(box);
+  sigFloat = { rec, el: box, sig, aspect, x, y, w, h };
+  layoutSigFloat();
+
+  box.addEventListener('pointerdown', (e) => {
+    if (e.button !== 0 || e.target.closest('.sig-bar')) return;
+    e.preventDefault(); e.stopPropagation();
+    const f = sigFloat, handle = e.target.closest('.sig-h');
+    f.op = { kind: handle ? handle.dataset.c : 'move', px: e.clientX, py: e.clientY, x: f.x, y: f.y, w: f.w };
+    box.setPointerCapture(e.pointerId);
+  });
+  box.addEventListener('pointermove', (e) => {
+    const f = sigFloat; if (!f || !f.op) return;
+    const k = pxPerPt(), o = f.op, pg = S.doc.pages[f.rec.i];
+    const dx = (e.clientX - o.px) / k, dy = (e.clientY - o.py) / k;
+    if (o.kind === 'move') {
+      f.x = clamp(o.x + dx, 0, pg.width - f.w); f.y = clamp(o.y + dy, 0, pg.height - f.h);
+    } else {
+      const east = o.kind.includes('e'), south = o.kind.includes('s');
+      const right = o.x + o.w, bottom = o.y + o.w * f.aspect;
+      let w = clamp(o.w + (east ? dx : -dx), 24, Math.min(pg.width, pg.height / f.aspect));
+      // Keep the opposite corner fixed and the picture inside the page.
+      w = Math.min(w, east ? pg.width - o.x : right, south ? (pg.height - o.y) / f.aspect : bottom / f.aspect);
+      f.w = Math.max(w, 8); f.h = f.w * f.aspect;
+      f.x = east ? o.x : right - f.w;
+      f.y = south ? o.y : bottom - f.h;
+    }
+    layoutSigFloat();
+  });
+  const end = (e) => { if (sigFloat && sigFloat.op) { sigFloat.op = null; S.sigWidth = sigFloat.w; } try { box.releasePointerCapture(e.pointerId); } catch (_) { /* ignore */ } };
+  box.addEventListener('pointerup', end);
+  box.addEventListener('pointercancel', end);
+}
+
+function layoutSigFloat() {
+  const f = sigFloat; if (!f) return;
+  const k = pxPerPt(), s = f.el.style;
+  s.left = f.x * k + 'px'; s.top = f.y * k + 'px'; s.width = f.w * k + 'px'; s.height = f.h * k + 'px';
+  f.el.classList.toggle('bar-below', f.y * k < 44);
+}
+
+/** Finish the floating signature: bake it into the page, or throw it away. */
+function closeSigFloat(commit) {
+  const f = sigFloat; if (!f) return;
+  sigFloat = null;
+  f.el.remove();
+  if (!commit) return;
+  S.sigWidth = f.w;
+  commitAnnot({ kind: 'image', page: f.rec.i, rect: { x: f.x, y: f.y, w: f.w, h: f.h }, png: f.sig.png }, f.rec.i);
 }
 
 // ───────────────────────────── thumbnails: select + drag to reorder ─────────
@@ -900,6 +1208,7 @@ $('#btn-zoom-in').onclick = () => zoomBy(1.2);
 $('#btn-zoom-out').onclick = () => zoomBy(1 / 1.2);
 $('#zoom-label').onclick = () => setZoom(fitZoom(), true);
 $('#btn-merge').onclick = mergeDialog;
+$('#btn-sigs').onclick = () => chooseSignature();
 $('#page-input').addEventListener('change', (e) => goToPage((parseInt(e.target.value, 10) || 1) - 1));
 $('#btn-next').onclick = () => stepHit(1);
 $('#btn-prev').onclick = () => stepHit(-1);
@@ -950,8 +1259,12 @@ window.addEventListener('keydown', (e) => {
     else if (k === 'p') { e.preventDefault(); S.doc && printDoc(); }
     return;
   }
+  if (sigFloat && !typing) {
+    if (e.key === 'Enter') { e.preventDefault(); closeSigFloat(true); return; }
+    if (e.key === 'Escape') { e.preventDefault(); closeSigFloat(false); return; }
+  }
   if (typing) return;
-  const tools = { v: 'select', h: 'highlight', b: 'box', p: 'pen', t: 'text' };
+  const tools = { v: 'select', h: 'highlight', b: 'box', p: 'pen', t: 'text', s: 'sign' };
   if (tools[k]) { setTool(tools[k]); return; }
   if (e.key === 'Escape') { S.selected.clear(); updateThumbStates(); setTool('select'); }
   else if (e.key === 'Home') goToPage(0);

@@ -10,6 +10,7 @@
 //! This module converts to and from PDF user space internally.
 
 use pdfium_render::prelude::*;
+use base64::Engine as _;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -77,6 +78,8 @@ pub enum Annot {
     Rect { page: u32, rect: Rect, color: [u8; 3], width: f32 },
     Ink { page: u32, points: Vec<[f32; 2]>, color: [u8; 3], width: f32 },
     Text { page: u32, x: f32, y: f32, text: String, size: f32, color: [u8; 3] },
+    /// A PNG (base64, alpha kept) stretched over `rect`. Used for signatures.
+    Image { page: u32, rect: Rect, png: String },
 }
 
 impl Annot {
@@ -85,7 +88,8 @@ impl Annot {
             Annot::Highlight { page, .. }
             | Annot::Rect { page, .. }
             | Annot::Ink { page, .. }
-            | Annot::Text { page, .. } => *page,
+            | Annot::Text { page, .. }
+            | Annot::Image { page, .. } => *page,
         }
     }
 }
@@ -739,6 +743,23 @@ fn apply_annots(doc: &mut PdfDocument<'static>, annots: &[Annot]) -> Result<()> 
                         .map_err(err)?;
                     page.objects_mut().add_text_object(obj).map_err(err)?;
                 }
+            }
+            Annot::Image { rect, png, .. } => {
+                if rect.w < 1.0 || rect.h < 1.0 {
+                    continue;
+                }
+                let bytes = base64::engine::general_purpose::STANDARD
+                    .decode(png.trim().rsplit(',').next().unwrap_or(""))
+                    .map_err(|e| format!("Bad signature image: {}", e))?;
+                let img = image::load_from_memory(&bytes).map_err(|e| format!("Bad signature image: {}", e))?;
+                let mut obj = PdfPageImageObject::new(doc, &img).map_err(err)?;
+                // The object starts as a unit square. Map its x axis along display-right and its
+                // y axis along display-up, so the picture stays upright on rotated pages.
+                let (x0, y0) = map.to_pdf(rect.x, rect.y + rect.h);
+                let (x1, y1) = map.to_pdf(rect.x + rect.w, rect.y + rect.h);
+                let (x2, y2) = map.to_pdf(rect.x, rect.y);
+                obj.transform(x1 - x0, y1 - y0, x2 - x0, y2 - y0, x0, y0).map_err(err)?;
+                page.objects_mut().add_image_object(obj).map_err(err)?;
             }
         }
         page.regenerate_content().map_err(err)?;

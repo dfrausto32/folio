@@ -272,3 +272,40 @@ fn real_world_fixture_opens_searches_and_renders() {
     let png = e.render(doc.id, 2, 800).unwrap();
     assert_eq!(image::load_from_memory(&png).unwrap().width(), 800);
 }
+
+/// A signature image must land upright inside its rectangle on every page rotation.
+/// The test picture is black only in its top-left quadrant, so a flip or a turn shows up.
+#[test]
+fn image_annotation_stays_upright_on_rotated_pages() {
+    use base64::Engine as _;
+    let e = need_engine!();
+    let mut img = image::RgbaImage::from_pixel(80, 40, image::Rgba([0, 0, 0, 0]));
+    for y in 0..20 {
+        for x in 0..40 {
+            img.put_pixel(x, y, image::Rgba([0, 0, 0, 255]));
+        }
+    }
+    let mut bytes = Vec::new();
+    image::DynamicImage::ImageRgba8(img)
+        .write_to(&mut std::io::Cursor::new(&mut bytes), image::ImageFormat::Png)
+        .unwrap();
+    let b64 = format!("data:image/png;base64,{}", base64::engine::general_purpose::STANDARD.encode(&bytes));
+    for rot in [0, 90, 180, 270] {
+        let doc = e.new_blank().unwrap();
+        let id = doc.id;
+        let info = if rot == 0 { e.info(id).unwrap() } else { e.rotate_pages(id, vec![0], rot).unwrap() };
+        let p = info.pages[0].clone();
+        let r = Rect { x: 60.0, y: 80.0, w: 160.0, h: 80.0 };
+        e.add_annotations(id, vec![Annot::Image { page: 0, rect: r.clone(), png: b64.clone() }]).unwrap();
+        let png = e.render(id, 0, 800).unwrap();
+        let q = |dx: f32, dy: f32| Rect { x: r.x + dx * 80.0 + 2.0, y: r.y + dy * 40.0 + 2.0, w: 76.0, h: 36.0 };
+        assert!(ink_fraction(&png, p.width, p.height, &q(0.0, 0.0)) > 0.9, "rot {} top-left missing", rot);
+        assert!(ink_fraction(&png, p.width, p.height, &q(1.0, 0.0)) < 0.05, "rot {} top-right inked", rot);
+        assert!(ink_fraction(&png, p.width, p.height, &q(0.0, 1.0)) < 0.05, "rot {} bottom-left inked", rot);
+        assert!(ink_fraction(&png, p.width, p.height, &q(1.0, 1.0)) < 0.05, "rot {} bottom-right inked", rot);
+        // Undo removes it again.
+        e.undo(id).unwrap();
+        let png = e.render(id, 0, 800).unwrap();
+        assert!(ink_fraction(&png, p.width, p.height, &r) < 0.02, "rot {} undo left ink", rot);
+    }
+}

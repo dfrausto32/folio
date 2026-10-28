@@ -8,3 +8,8 @@ description = "PDF engine for Folio (PDFium wrapper running on a dedicated worke
 pdfium-render = { version = "0.9", default-features = false, features = ["pdfium_7543", "image_latest", "thread_safe"] }
 image = { version = "0.25", default-features = false, features = ["png"] }
 serde = { version = "1", features = ["derive"] }
+base64 = "0.22"
+
+[dev-dependencies]
+base64 = "0.22"
+image = { version = "0.25", default-features = false, features = ["png"] }
